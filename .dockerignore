@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Go build
+**/*.test
+**/*.out
+**/*.prof
+**/*.cover
+/bin
+/build
+/out
+
+# IDE junk
+.vscode
+.idea
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local artifacts
+.env
+
+# Others
+*.tar.gz
+*.snap

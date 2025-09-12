@@ -1,0 +1,19 @@
+services:
+  vault:
+    image: hashicorp/vault
+    # command: ["server", "-config=/vault/config"]  # ❌ remove this
+    command: ["server"]                              # ✅ let entrypoint add -config=/vault/config
+    environment:
+      - VAULT_ADDR=http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./deploy/vault:/vault/config:rw
+      - vault_data:/vault/file:rw
+    restart: unless-stopped
+    ports:
+      - "8200:8200"  # Optional, for direct access without Traefik
+
+
+volumes:
+  vault_data:

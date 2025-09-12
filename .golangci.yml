@@ -1,0 +1,77 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  disable:
+    - errcheck      # Disabled: intentional best-effort error handling with _ =
+  enable:
+    - misspell      # Spell checking
+    - gocritic      # Go source code linter
+    - gosec         # Security issues
+    - nolintlint    # Validate nolint directives
+    - unparam       # Unused function parameters
+    - unconvert     # Unnecessary type conversions
+    - prealloc      # Preallocate slices
+    - bodyclose     # Check HTTP response body closed
+    - contextcheck  # Check context usage
+    - errorlint     # Error wrapping
+    - gocyclo       # Cyclomatic complexity
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - shadow
+        - fieldalignment
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - unnamedResult
+        - paramTypeCombine
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (covered by errcheck)
+        - G304  # File path via variable - intentional for backup/restore
+        - G301  # Directory permissions 0755 is standard
+        - G404  # math/rand for jitter is acceptable
+    misspell:
+      locale: US
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+      - path: cmd/operator/main\.go
+        linters:
+          - gocyclo
+          - funlen
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Chapsvision-dev/vault-raft-backup-restore
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+      colors: true

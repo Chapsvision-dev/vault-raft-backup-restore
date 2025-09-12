@@ -1,0 +1,22 @@
+# Go
+bin/
+dist/
+build/
+*.exe
+*.out
+coverage-report.html
+
+# asdf
+.tool-versions.local
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docker
+.env
+
+# Others
+*.tar.gz
+*.snap
