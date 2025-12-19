@@ -62,6 +62,24 @@ make build
 
 ### Setup
 
+**For asdf users:**
+
+If you use [asdf](https://asdf-vm.com/) to manage tool versions, the project includes a `.tool-versions` file that specifies the exact Go version (1.25.5):
+
+```bash
+# Install the Go plugin if not already installed
+asdf plugin add golang https://github.com/asdf-community/asdf-golang.git
+
+# Install the exact version specified in .tool-versions
+asdf install
+
+# Verify the version
+asdf current golang
+# golang          1.25.5          /path/to/project/.tool-versions
+```
+
+**Standard setup:**
+
 ```bash
 # Align local tool versions (if using asdf)
 make setup
