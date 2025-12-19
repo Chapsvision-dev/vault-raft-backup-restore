@@ -186,11 +186,8 @@ func SaveSnapshot(ctx context.Context, addr, token, localFile string, opts retry
 		addr = "http://vault-hashicorp.localhost"
 	}
 
-	// Ensure parent dir exists
-	if dir := filepath.Dir(localFile); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
+	if err := ensureParentDir(localFile); err != nil {
+		return err
 	}
 
 	startTotal := time.Now()
@@ -198,63 +195,17 @@ func SaveSnapshot(ctx context.Context, addr, token, localFile string, opts retry
 	defer cancel()
 
 	client := &http.Client{Timeout: 2 * time.Minute}
-
-	// Prefer sending directly to the active leader.
 	addr = discoverLeader(ctx, addr, client)
 	urlStr := strings.TrimRight(addr, "/") + pathSnapshotGet
 
 	attempt := 0
 	doOnce := func(ctx context.Context) error {
 		attempt++
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, http.NoBody)
-		if err != nil {
-			return err
-		}
-		if token != "" {
-			req.Header.Set("X-Vault-Token", token)
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Debug().Err(err).Str("action", "vault_snapshot_get").Int("attempt", attempt).Msg("request error")
-			return err
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		// Handle redirects to the leader (HA)
-		if err := handleSnapshotRedirect(resp, &urlStr, attempt); err != nil {
-			return err
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			retryAfter := parseRetryAfter(resp)
-			log.Debug().Int("status", resp.StatusCode).Dur("retry_after", retryAfter).
-				Str("action", "vault_snapshot_get").Int("attempt", attempt).Msg("non-200 response")
-			return httpStatusError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
-		}
-
-		if err := writeSnapshotToFile(localFile, resp.Body, attempt); err != nil {
-			return err
-		}
-
-		log.Debug().Str("action", "vault_snapshot_get").Int("attempt", attempt).
-			Dur("elapsed_ms", time.Since(startTotal)).Msg("attempt succeeded")
-		return nil
+		return executeSnapshotGet(ctx, client, &urlStr, token, localFile, attempt, startTotal)
 	}
 
 	err := retry.Do(ctx, opts, isSnapshotRetryable, func(ctx context.Context) error {
-		err := doOnce(ctx)
-		var se httpStatusError
-		if errors.As(err, &se) && se.RetryAfter > 0 {
-			timer := time.NewTimer(se.RetryAfter)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-		return err
+		return handleRetryAfter(ctx, doOnce)
 	})
 	if err != nil {
 		log.Error().Err(err).Str("action", "vault_snapshot_get").Int("attempts", attempt).
@@ -265,6 +216,69 @@ func SaveSnapshot(ctx context.Context, addr, token, localFile string, opts retry
 	log.Debug().Str("action", "vault_snapshot_get").Int("attempts", attempt).
 		Dur("total_elapsed_ms", time.Since(startTotal)).Str("local", localFile).Msg("snapshot download OK")
 	return nil
+}
+
+// ensureParentDir creates the parent directory if it doesn't exist.
+func ensureParentDir(localFile string) error {
+	if dir := filepath.Dir(localFile); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// executeSnapshotGet performs a single snapshot GET request.
+func executeSnapshotGet(ctx context.Context, client *http.Client, urlStr *string, token, localFile string, attempt int, startTotal time.Time) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *urlStr, http.NoBody)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("X-Vault-Token", token)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Debug().Err(err).Str("action", "vault_snapshot_get").Int("attempt", attempt).Msg("request error")
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := handleSnapshotRedirect(resp, urlStr, attempt); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		retryAfter := parseRetryAfter(resp)
+		log.Debug().Int("status", resp.StatusCode).Dur("retry_after", retryAfter).
+			Str("action", "vault_snapshot_get").Int("attempt", attempt).Msg("non-200 response")
+		return httpStatusError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
+	}
+
+	if err := writeSnapshotToFile(localFile, resp.Body, attempt); err != nil {
+		return err
+	}
+
+	log.Debug().Str("action", "vault_snapshot_get").Int("attempt", attempt).
+		Dur("elapsed_ms", time.Since(startTotal)).Msg("attempt succeeded")
+	return nil
+}
+
+// handleRetryAfter handles Retry-After header by sleeping before retry.
+func handleRetryAfter(ctx context.Context, fn func(context.Context) error) error {
+	err := fn(ctx)
+	var se httpStatusError
+	if errors.As(err, &se) && se.RetryAfter > 0 {
+		timer := time.NewTimer(se.RetryAfter)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return err
 }
 
 // RestoreSnapshot uploads a snapshot to Vault Raft.
@@ -279,8 +293,6 @@ func RestoreSnapshot(ctx context.Context, addr, token, localFile string, force b
 	defer cancel()
 
 	client := &http.Client{Timeout: 2 * time.Minute}
-
-	// Prefer sending directly to the active leader.
 	addr = discoverLeader(ctx, addr, client)
 
 	path := pathSnapshotPost
@@ -292,72 +304,11 @@ func RestoreSnapshot(ctx context.Context, addr, token, localFile string, force b
 	attempt := 0
 	doOnce := func(ctx context.Context) error {
 		attempt++
-
-		f, err := os.Open(localFile)
-		if err != nil {
-			return err
-		}
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, f)
-		if err != nil {
-			_ = f.Close()
-			return err
-		}
-		if token != "" {
-			req.Header.Set("X-Vault-Token", token)
-		}
-		req.Header.Set("Content-Type", "application/octet-stream")
-
-		resp, err := client.Do(req)
-		// Close the file immediately after the request is issued to avoid double-close warnings.
-		_ = f.Close()
-
-		if err != nil {
-			log.Debug().Err(err).Str("action", "vault_snapshot_post").Int("attempt", attempt).Msg("request error")
-			return err
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		// Handle redirects to the leader (HA)
-		if resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusPermanentRedirect {
-			loc := resolveRedirectURL(resp.Request.URL, resp.Header.Get("Location"))
-			if loc != "" {
-				log.Debug().
-					Int("status", resp.StatusCode).
-					Str("location", loc).
-					Str("action", "vault_snapshot_post").
-					Int("attempt", attempt).
-					Msg("redirect to leader")
-				urlStr = loc
-				return httpStatusError{StatusCode: resp.StatusCode}
-			}
-		}
-
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			retryAfter := parseRetryAfter(resp)
-			log.Debug().Int("status", resp.StatusCode).Dur("retry_after", retryAfter).
-				Str("action", "vault_snapshot_post").Int("attempt", attempt).Msg("non-200/204 response")
-			return httpStatusError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
-		}
-
-		log.Debug().Str("action", "vault_snapshot_post").Int("attempt", attempt).
-			Dur("elapsed_ms", time.Since(startTotal)).Msg("attempt succeeded")
-		return nil
+		return executeSnapshotPost(ctx, client, &urlStr, token, localFile, attempt, startTotal)
 	}
 
 	err := retry.Do(ctx, opts, isSnapshotRetryable, func(ctx context.Context) error {
-		err := doOnce(ctx)
-		var se httpStatusError
-		if errors.As(err, &se) && se.RetryAfter > 0 {
-			timer := time.NewTimer(se.RetryAfter)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-		return err
+		return handleRetryAfter(ctx, doOnce)
 	})
 	if err != nil {
 		log.Error().Err(err).Str("action", "vault_snapshot_post").Int("attempts", attempt).
@@ -367,5 +318,65 @@ func RestoreSnapshot(ctx context.Context, addr, token, localFile string, force b
 
 	log.Debug().Str("action", "vault_snapshot_post").Int("attempts", attempt).
 		Dur("total_elapsed_ms", time.Since(startTotal)).Str("local", localFile).Msg("vault restore OK")
+	return nil
+}
+
+// executeSnapshotPost performs a single snapshot POST request.
+func executeSnapshotPost(ctx context.Context, client *http.Client, urlStr *string, token, localFile string, attempt int, startTotal time.Time) error {
+	f, err := os.Open(localFile)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, *urlStr, f)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	if token != "" {
+		req.Header.Set("X-Vault-Token", token)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := client.Do(req)
+	_ = f.Close()
+
+	if err != nil {
+		log.Debug().Err(err).Str("action", "vault_snapshot_post").Int("attempt", attempt).Msg("request error")
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := handleRestoreRedirect(resp, urlStr, attempt); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		retryAfter := parseRetryAfter(resp)
+		log.Debug().Int("status", resp.StatusCode).Dur("retry_after", retryAfter).
+			Str("action", "vault_snapshot_post").Int("attempt", attempt).Msg("non-200/204 response")
+		return httpStatusError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
+	}
+
+	log.Debug().Str("action", "vault_snapshot_post").Int("attempt", attempt).
+		Dur("elapsed_ms", time.Since(startTotal)).Msg("attempt succeeded")
+	return nil
+}
+
+// handleRestoreRedirect handles redirects during snapshot restore.
+func handleRestoreRedirect(resp *http.Response, urlStr *string, attempt int) error {
+	if resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusPermanentRedirect {
+		loc := resolveRedirectURL(resp.Request.URL, resp.Header.Get("Location"))
+		if loc != "" {
+			log.Debug().
+				Int("status", resp.StatusCode).
+				Str("location", loc).
+				Str("action", "vault_snapshot_post").
+				Int("attempt", attempt).
+				Msg("redirect to leader")
+			*urlStr = loc
+			return httpStatusError{StatusCode: resp.StatusCode}
+		}
+	}
 	return nil
 }
