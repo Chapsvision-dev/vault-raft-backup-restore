@@ -40,6 +40,19 @@ func (p *AzureProvider) Backup(ctx context.Context, source, target string) error
 		return fmt.Errorf("checksum: %w", err)
 	}
 
+	if err := p.uploadWithRetry(ctx, source, key, sum); err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+
+	if err := p.validateUpload(ctx, key, sum, size); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// uploadWithRetry uploads a file to Azure Blob Storage with retry logic.
+func (p *AzureProvider) uploadWithRetry(ctx context.Context, source, key, sum string) error {
 	upStart := time.Now()
 	upAttempt := 0
 	uploadOnce := func(ctx context.Context) error {
@@ -77,78 +90,90 @@ func (p *AzureProvider) Backup(ctx context.Context, source, target string) error
 		return nil
 	}
 	if err := retry.Do(ctx, p.ro, p.isAzRetryable, uploadOnce); err != nil {
-		return fmt.Errorf("upload: %w", err)
+		return err
 	}
 	log.Info().Str("action", "azure_upload").Str("container", p.container).Str("key", key).
 		Int("attempts", upAttempt).Dur("elapsed_ms", time.Since(upStart)).Msg("upload OK")
+	return nil
+}
 
-	// Post-upload validation.
+// validateUpload validates the uploaded file using HEAD (with SAS) or LIST (without SAS).
+func (p *AzureProvider) validateUpload(ctx context.Context, key, sum string, size int64) error {
 	if p.authViaSAS {
-		headStart := time.Now()
-		headAttempt := 0
-		headOnce := func(ctx context.Context) error {
-			headAttempt++
-			log.Debug().Str("action", "azure_head").Str("container", p.container).Str("key", key).
-				Int("attempt", headAttempt).Msg("starting attempt")
-
-			remoteSize, remoteSHA, err := p.headSizeAndSHA(ctx, key)
-			if err != nil {
-				log.Debug().Err(err).Str("action", "azure_head").Str("container", p.container).Str("key", key).
-					Int("attempt", headAttempt).Msg("attempt failed")
-				return err
-			}
-			if remoteSize != size {
-				return fmt.Errorf("size mismatch: local=%d, remote=%d", size, remoteSize)
-			}
-			if remoteSHA == "" {
-				return fmt.Errorf("missing metadata: sha256")
-			}
-			if remoteSHA != sum {
-				return fmt.Errorf("sha256 mismatch: local=%s, remote=%s", sum, remoteSHA)
-			}
-
-			log.Debug().Str("action", "azure_head").Str("container", p.container).Str("key", key).
-				Int("attempt", headAttempt).Int64("remote_size", remoteSize).Msg("attempt succeeded")
-			return nil
-		}
-		if err := retry.Do(ctx, p.ro, p.isAzRetryable, headOnce); err != nil {
-			return fmt.Errorf("validate (head): %w", err)
-		}
-		log.Info().Str("action", "azure_head").Str("container", p.container).Str("key", key).
-			Int("attempts", headAttempt).Dur("elapsed_ms", time.Since(headStart)).
-			Msg("validation OK (sha256 & size)")
-	} else {
-		listStart := time.Now()
-		listAttempt := 0
-		validateOnce := func(ctx context.Context) error {
-			listAttempt++
-			log.Debug().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
-				Int("attempt", listAttempt).Msg("starting attempt")
-
-			found, remoteSize, err := p.validateSizeByList(ctx, key)
-			if err != nil {
-				log.Debug().Err(err).Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
-					Int("attempt", listAttempt).Msg("attempt failed")
-				return err
-			}
-			if !found {
-				return fmt.Errorf("uploaded blob not found at %q", key)
-			}
-			if remoteSize != size {
-				return fmt.Errorf("size mismatch: local=%d, remote=%d", size, remoteSize)
-			}
-
-			log.Debug().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
-				Int("attempt", listAttempt).Int64("remote_size", remoteSize).Msg("attempt succeeded")
-			return nil
-		}
-		if err := retry.Do(ctx, p.ro, p.isAzRetryable, validateOnce); err != nil {
-			return fmt.Errorf("validate (list): %w", err)
-		}
-		log.Info().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
-			Int("attempts", listAttempt).Dur("elapsed_ms", time.Since(listStart)).Msg("validation OK (size)")
+		return p.validateWithHead(ctx, key, sum, size)
 	}
+	return p.validateWithList(ctx, key, size)
+}
 
+// validateWithHead validates upload using HEAD request (requires SAS).
+func (p *AzureProvider) validateWithHead(ctx context.Context, key, sum string, size int64) error {
+	headStart := time.Now()
+	headAttempt := 0
+	headOnce := func(ctx context.Context) error {
+		headAttempt++
+		log.Debug().Str("action", "azure_head").Str("container", p.container).Str("key", key).
+			Int("attempt", headAttempt).Msg("starting attempt")
+
+		remoteSize, remoteSHA, err := p.headSizeAndSHA(ctx, key)
+		if err != nil {
+			log.Debug().Err(err).Str("action", "azure_head").Str("container", p.container).Str("key", key).
+				Int("attempt", headAttempt).Msg("attempt failed")
+			return err
+		}
+		if remoteSize != size {
+			return fmt.Errorf("size mismatch: local=%d, remote=%d", size, remoteSize)
+		}
+		if remoteSHA == "" {
+			return fmt.Errorf("missing metadata: sha256")
+		}
+		if remoteSHA != sum {
+			return fmt.Errorf("sha256 mismatch: local=%s, remote=%s", sum, remoteSHA)
+		}
+
+		log.Debug().Str("action", "azure_head").Str("container", p.container).Str("key", key).
+			Int("attempt", headAttempt).Int64("remote_size", remoteSize).Msg("attempt succeeded")
+		return nil
+	}
+	if err := retry.Do(ctx, p.ro, p.isAzRetryable, headOnce); err != nil {
+		return fmt.Errorf("validate (head): %w", err)
+	}
+	log.Info().Str("action", "azure_head").Str("container", p.container).Str("key", key).
+		Int("attempts", headAttempt).Dur("elapsed_ms", time.Since(headStart)).
+		Msg("validation OK (sha256 & size)")
+	return nil
+}
+
+// validateWithList validates upload using LIST operation (fallback without SAS).
+func (p *AzureProvider) validateWithList(ctx context.Context, key string, size int64) error {
+	listStart := time.Now()
+	listAttempt := 0
+	validateOnce := func(ctx context.Context) error {
+		listAttempt++
+		log.Debug().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
+			Int("attempt", listAttempt).Msg("starting attempt")
+
+		found, remoteSize, err := p.validateSizeByList(ctx, key)
+		if err != nil {
+			log.Debug().Err(err).Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
+				Int("attempt", listAttempt).Msg("attempt failed")
+			return err
+		}
+		if !found {
+			return fmt.Errorf("uploaded blob not found at %q", key)
+		}
+		if remoteSize != size {
+			return fmt.Errorf("size mismatch: local=%d, remote=%d", size, remoteSize)
+		}
+
+		log.Debug().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
+			Int("attempt", listAttempt).Int64("remote_size", remoteSize).Msg("attempt succeeded")
+		return nil
+	}
+	if err := retry.Do(ctx, p.ro, p.isAzRetryable, validateOnce); err != nil {
+		return fmt.Errorf("validate (list): %w", err)
+	}
+	log.Info().Str("action", "azure_list_validate").Str("container", p.container).Str("key", key).
+		Int("attempts", listAttempt).Dur("elapsed_ms", time.Since(listStart)).Msg("validation OK (size)")
 	return nil
 }
 
