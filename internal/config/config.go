@@ -56,156 +56,186 @@ type AuthConfig struct {
 
 // Load reads config from environment variables, applies defaults and validates.
 func Load() (Config, error) {
-	get := func(key, def string) string {
-		if v, ok := os.LookupEnv(key); ok {
-			return v
-		}
-		return def
-	}
-
-	parseInt := func(key string, def int) int {
-		if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-				return n
-			}
-		}
-		return def
-	}
-
-	parseDur := func(key string, def time.Duration) time.Duration {
-		if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
-			if d, err := time.ParseDuration(v); err == nil {
-				return d
-			}
-		}
-		return def
-	}
-
-	parseFloat := func(key string, def float64) float64 {
-		if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
-				return f
-			}
-		}
-		return def
-	}
-
-	parseBool := func(key string, def bool) bool {
-		if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
-			switch strings.ToLower(v) {
-			case "1", "true", "yes", "y", "on":
-				return true
-			case "0", "false", "no", "n", "off":
-				return false
-			}
-		}
-		return def
-	}
-
-	fileReadable := func(path string) bool {
-		if strings.TrimSpace(path) == "" {
-			return false
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return false
-		}
-		_ = f.Close()
-		return true
-	}
-
-	// Vault address with default
-	vaultAddr := get("VAULT_ADDR", "")
+	vaultAddr := getEnvWithDefault("VAULT_ADDR", "")
 	if strings.TrimSpace(vaultAddr) == "" {
 		vaultAddr = "http://127.0.0.1:8200"
 	}
 
-	// -------------------------
-	// Auth parsing (fallbacks)
-	// -------------------------
-	const defaultJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-
-	method := strings.ToLower(strings.TrimSpace(get("VAULT_AUTH_METHOD", "")))
-	tokenEnv := strings.TrimSpace(get("VAULT_TOKEN", ""))
-
-	if method == "" {
-		switch {
-		case tokenEnv != "":
-			method = "token"
-		case fileReadable(get("VAULT_K8S_JWT_PATH", defaultJWTPath)):
-			method = "kubernetes"
-		default:
-			return Config{}, errors.New("no auth method configured: set VAULT_AUTH_METHOD=token with VAULT_TOKEN, or provide a readable VAULT_K8S_JWT_PATH for kubernetes")
-		}
-	}
-
-	auth := AuthConfig{
-		Method:     method,
-		Namespace:  strings.TrimSpace(get("VAULT_NAMESPACE", "")),
-		CACert:     strings.TrimSpace(get("VAULT_CACERT", "")),
-		CAPath:     strings.TrimSpace(get("VAULT_CAPATH", "")),
-		SkipVerify: parseBool("VAULT_SKIP_VERIFY", false),
-	}
-
-	switch method {
-	case "token":
-		auth.Token = tokenEnv
-		if strings.TrimSpace(auth.Token) == "" {
-			return Config{}, errors.New("auth method token requires VAULT_TOKEN")
-		}
-
-	case "kubernetes":
-		auth.Mount = strings.TrimSpace(get("VAULT_AUTH_MOUNT", "kubernetes"))
-		if auth.Mount == "" {
-			auth.Mount = "kubernetes"
-		}
-		auth.Role = strings.TrimSpace(get("VAULT_K8S_ROLE", ""))
-		if auth.Role == "" {
-			return Config{}, errors.New("auth method kubernetes requires VAULT_K8S_ROLE")
-		}
-		auth.JWTPath = strings.TrimSpace(get("VAULT_K8S_JWT_PATH", defaultJWTPath))
-		if !fileReadable(auth.JWTPath) {
-			return Config{}, errors.New("auth method kubernetes requires a readable VAULT_K8S_JWT_PATH")
-		}
-		auth.Audience = strings.TrimSpace(get("VAULT_K8S_AUDIENCE", ""))
-
-	default:
-		return Config{}, errors.New("unsupported auth method: " + method)
+	auth, err := loadAuthConfig()
+	if err != nil {
+		return Config{}, err
 	}
 
 	cfg := Config{
-		Provider:  strings.ToLower(get("BACKUP_PROVIDER", "azure")),
+		Provider:  strings.ToLower(getEnvWithDefault("BACKUP_PROVIDER", "azure")),
 		VaultAddr: vaultAddr,
 		Auth:      auth,
-		// compat: if your Config still has VaultToken, mirror it for existing call sites
-		// VaultToken:            auth.Token,
 
-		BackupSource:          get("BACKUP_SOURCE", ""),
-		BackupTarget:          get("BACKUP_TARGET", ""),
-		BackupTimestampFormat: get("BACKUP_TIMESTAMP_FORMAT", ""),
-		RestoreSource:         get("RESTORE_SOURCE", ""),
-		RestoreTarget:         get("RESTORE_TARGET", ""),
+		BackupSource:          getEnvWithDefault("BACKUP_SOURCE", ""),
+		BackupTarget:          getEnvWithDefault("BACKUP_TARGET", ""),
+		BackupTimestampFormat: getEnvWithDefault("BACKUP_TIMESTAMP_FORMAT", ""),
+		RestoreSource:         getEnvWithDefault("RESTORE_SOURCE", ""),
+		RestoreTarget:         getEnvWithDefault("RESTORE_TARGET", ""),
 
-		Azure: AzureConfig{
-			Account:      get("AZURE_STORAGE_ACCOUNT", ""),
-			Container:    get("AZURE_STORAGE_CONTAINER", ""),
-			SASToken:     get("AZURE_STORAGE_SAS", ""),
-			ClientID:     get("AZURE_CLIENT_ID", ""),
-			ClientSecret: get("AZURE_CLIENT_SECRET", ""),
-			TenantID:     get("AZURE_TENANT_ID", ""),
-		},
+		Azure: loadAzureConfig(),
 
-		RetryMaxAttempts:  parseInt("RETRY_MAX_ATTEMPTS", retry.Default.MaxAttempts),
-		RetryInitialDelay: parseDur("RETRY_INITIAL_DELAY", retry.Default.InitialDelay),
-		RetryMaxDelay:     parseDur("RETRY_MAX_DELAY", retry.Default.MaxDelay),
-		RetryMultiplier:   parseFloat("RETRY_MULTIPLIER", retry.Default.Multiplier),
-		RetryEnableJitter: parseBool("RETRY_JITTER", retry.Default.Jitter),
+		RetryMaxAttempts:  parseEnvInt("RETRY_MAX_ATTEMPTS", retry.Default.MaxAttempts),
+		RetryInitialDelay: parseEnvDuration("RETRY_INITIAL_DELAY", retry.Default.InitialDelay),
+		RetryMaxDelay:     parseEnvDuration("RETRY_MAX_DELAY", retry.Default.MaxDelay),
+		RetryMultiplier:   parseEnvFloat("RETRY_MULTIPLIER", retry.Default.Multiplier),
+		RetryEnableJitter: parseEnvBool("RETRY_JITTER", retry.Default.Jitter),
 	}
 
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// loadAuthConfig parses authentication configuration from environment variables.
+func loadAuthConfig() (AuthConfig, error) {
+	const defaultJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+	method := strings.ToLower(strings.TrimSpace(getEnvWithDefault("VAULT_AUTH_METHOD", "")))
+	tokenEnv := strings.TrimSpace(getEnvWithDefault("VAULT_TOKEN", ""))
+
+	if method == "" {
+		method = detectAuthMethod(tokenEnv, defaultJWTPath)
+		if method == "" {
+			return AuthConfig{}, errors.New("no auth method configured: set VAULT_AUTH_METHOD=token with VAULT_TOKEN, or provide a readable VAULT_K8S_JWT_PATH for kubernetes")
+		}
+	}
+
+	auth := AuthConfig{
+		Method:     method,
+		Namespace:  strings.TrimSpace(getEnvWithDefault("VAULT_NAMESPACE", "")),
+		CACert:     strings.TrimSpace(getEnvWithDefault("VAULT_CACERT", "")),
+		CAPath:     strings.TrimSpace(getEnvWithDefault("VAULT_CAPATH", "")),
+		SkipVerify: parseEnvBool("VAULT_SKIP_VERIFY", false),
+	}
+
+	if err := configureAuthMethod(&auth, method, tokenEnv, defaultJWTPath); err != nil {
+		return AuthConfig{}, err
+	}
+
+	return auth, nil
+}
+
+// detectAuthMethod automatically detects the auth method based on available credentials.
+func detectAuthMethod(tokenEnv, defaultJWTPath string) string {
+	if tokenEnv != "" {
+		return "token"
+	}
+	if isFileReadable(getEnvWithDefault("VAULT_K8S_JWT_PATH", defaultJWTPath)) {
+		return "kubernetes"
+	}
+	return ""
+}
+
+// configureAuthMethod configures the auth method specific fields.
+func configureAuthMethod(auth *AuthConfig, method, tokenEnv, defaultJWTPath string) error {
+	switch method {
+	case "token":
+		auth.Token = tokenEnv
+		if strings.TrimSpace(auth.Token) == "" {
+			return errors.New("auth method token requires VAULT_TOKEN")
+		}
+
+	case "kubernetes":
+		auth.Mount = strings.TrimSpace(getEnvWithDefault("VAULT_AUTH_MOUNT", "kubernetes"))
+		if auth.Mount == "" {
+			auth.Mount = "kubernetes"
+		}
+		auth.Role = strings.TrimSpace(getEnvWithDefault("VAULT_K8S_ROLE", ""))
+		if auth.Role == "" {
+			return errors.New("auth method kubernetes requires VAULT_K8S_ROLE")
+		}
+		auth.JWTPath = strings.TrimSpace(getEnvWithDefault("VAULT_K8S_JWT_PATH", defaultJWTPath))
+		if !isFileReadable(auth.JWTPath) {
+			return errors.New("auth method kubernetes requires a readable VAULT_K8S_JWT_PATH")
+		}
+		auth.Audience = strings.TrimSpace(getEnvWithDefault("VAULT_K8S_AUDIENCE", ""))
+
+	default:
+		return errors.New("unsupported auth method: " + method)
+	}
+	return nil
+}
+
+// loadAzureConfig loads Azure-specific configuration.
+func loadAzureConfig() AzureConfig {
+	return AzureConfig{
+		Account:      getEnvWithDefault("AZURE_STORAGE_ACCOUNT", ""),
+		Container:    getEnvWithDefault("AZURE_STORAGE_CONTAINER", ""),
+		SASToken:     getEnvWithDefault("AZURE_STORAGE_SAS", ""),
+		ClientID:     getEnvWithDefault("AZURE_CLIENT_ID", ""),
+		ClientSecret: getEnvWithDefault("AZURE_CLIENT_SECRET", ""),
+		TenantID:     getEnvWithDefault("AZURE_TENANT_ID", ""),
+	}
+}
+
+// getEnvWithDefault returns environment variable value or default.
+func getEnvWithDefault(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return def
+}
+
+// parseEnvInt parses an integer from environment variable.
+func parseEnvInt(key string, def int) int {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return def
+}
+
+// parseEnvDuration parses a duration from environment variable.
+func parseEnvDuration(key string, def time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
+// parseEnvFloat parses a float from environment variable.
+func parseEnvFloat(key string, def float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			return f
+		}
+	}
+	return def
+}
+
+// parseEnvBool parses a boolean from environment variable.
+func parseEnvBool(key string, def bool) bool {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		case "0", "false", "no", "n", "off":
+			return false
+		}
+	}
+	return def
+}
+
+// isFileReadable checks if a file exists and is readable.
+func isFileReadable(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 // validate checks provider-specific requirements.
