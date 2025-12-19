@@ -21,6 +21,8 @@ linters:
     - errorlint     # Error wrapping
     - gocyclo       # Cyclomatic complexity
   settings:
+    gocyclo:
+      min-complexity: 15  # Same threshold as goreportcard.com (default: 30)
     govet:
       enable-all: true
       disable:
