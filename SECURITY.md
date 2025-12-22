@@ -23,7 +23,7 @@ Instead, please report them via GitHub's Security Advisory feature:
 2. Fill out the advisory form with details about the vulnerability
 3. Click "Submit report"
 
-Alternatively, you can email security reports to: **cloudopsbur@chapsvision.com**
+Alternatively, you can email security reports to: **burcloudops@chapsvision.com**
 
 ### What to Include
 
