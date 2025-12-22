@@ -17,6 +17,7 @@ import (
 	"github.com/Chapsvision-dev/vault-raft-backup-restore/internal/provider"
 	"github.com/Chapsvision-dev/vault-raft-backup-restore/internal/restore"
 	"github.com/Chapsvision-dev/vault-raft-backup-restore/internal/snapshot"
+	"github.com/Chapsvision-dev/vault-raft-backup-restore/internal/version"
 
 	_ "github.com/Chapsvision-dev/vault-raft-backup-restore/internal/provider/azure"
 )
@@ -34,6 +35,8 @@ const usage = `
 Usage:
   operator backup  [source] [targetPrefix]
   operator restore [remoteKey] [localFile]
+  operator version | --version | -v
+  operator help    | --help    | -h
 
 Notes:
   - You can also set env vars:
@@ -54,6 +57,18 @@ func main() {
 		exit(2)
 	}
 	action := strings.ToLower(args[0])
+
+	// Handle version command
+	if action == "version" || action == "--version" || action == "-v" {
+		fmt.Printf("vault-raft-backup-operator %s\n", version.Info())
+		exit(0)
+	}
+
+	// Handle help command
+	if action == "help" || action == "--help" || action == "-h" {
+		fmt.Print(usage)
+		exit(0)
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
