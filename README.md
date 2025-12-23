@@ -9,7 +9,7 @@
 
 A lightweight Go-based automation operator for **backup** and **restore** of HashiCorp Vault Raft snapshots to cloud storage. Run as a CLI, Docker container, Kubernetes CronJob, or orchestrated via Terraform.
 
-> **Note:** This is an operations automation tool, not a Kubernetes Operator (CRD-based). Deployment examples for Kubernetes manifests and Terraform modules coming soon.
+> **Note:** This is an operations automation tool, not a Kubernetes Operator (CRD-based). See [examples/](examples/) for ready-to-use deployment configurations.
 
 ## Why?
 
@@ -28,16 +28,39 @@ This operator automates snapshot management so you can:
   * Static Vault Token (dev/local)
   * Kubernetes ServiceAccount + Vault Role (production)
 * **Pluggable storage providers**:
-  * Azure Blob Storage (SAS token auth)
+  * Azure Blob Storage (Service Principal, Managed Identity, or SAS token)
   * More providers coming soon (AWS S3, GCS, MinIO)
 * **Flexible deployment**:
   * Standalone CLI binary
   * Docker container
-  * Kubernetes CronJob (examples coming soon)
-  * Terraform orchestration (examples coming soon)
+  * Kubernetes CronJob ([examples](examples/kubernetes/))
+  * Terraform orchestration ([modules](examples/terraform/))
 * Local dev environment via Docker Compose
 * Developer-friendly Makefile targets
 * CI-ready commands (`build`, `test`, `lint`)
+
+---
+
+## Deployment Examples
+
+Ready-to-use deployment configurations for production environments:
+
+### 🐳 **[Docker Compose](examples/docker-compose/)**
+Local testing and development with Azure Blob Storage:
+- [Backup example](examples/docker-compose/backup/)
+- [Restore example](examples/docker-compose/restore/)
+
+### ☸️ **[Kubernetes](examples/kubernetes/)**
+Production-ready manifests with two Azure authentication methods:
+- **[Workload Identity](examples/kubernetes/azure/workload-identity/)** (recommended) - Passwordless, secret-free auth for AKS
+- **[Service Principal](examples/kubernetes/azure/service-principal/)** - Traditional credential-based auth
+
+### 🏗️ **[Terraform](examples/terraform/)**
+Complete infrastructure-as-code modules:
+- **[Workload Identity Module](examples/terraform/azure/workload-identity/)** - Managed Identity with federated credentials
+- **[Service Principal Module](examples/terraform/azure/service-principal/)** - Service Principal with auto-rotation
+
+Each example includes comprehensive documentation, security best practices, and troubleshooting guides.
 
 ---
 
@@ -160,7 +183,15 @@ VAULT_K8S_JWT_PATH=/var/run/secrets/kubernetes.io/serviceaccount/token
 BACKUP_PROVIDER=azure
 AZURE_STORAGE_ACCOUNT=myaccount
 AZURE_STORAGE_CONTAINER=vault-backups
+
+# Azure auth (choose one):
+# Option 1: SAS token
 AZURE_STORAGE_SAS=?sv=2025-...
+# Option 2: Service Principal
+# AZURE_CLIENT_ID=xxx
+# AZURE_TENANT_ID=xxx
+# AZURE_CLIENT_SECRET=xxx
+# Option 3: Managed Identity (auto-detected in Azure)
 
 ########################################
 # Backup / Restore
