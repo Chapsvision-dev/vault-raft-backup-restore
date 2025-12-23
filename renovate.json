@@ -45,14 +45,31 @@
       ]
     },
     {
-      "description": "Separate PR for golang.org/x/crypto security updates",
+      "description": "Separate PR for golang.org/x/* security-sensitive packages",
       "matchDatasources": [
         "go"
       ],
-      "matchPackageNames": [
-        "golang.org/x/crypto"
+      "matchPackagePatterns": [
+        "^golang\\.org/x/(crypto|net|sys|text|oauth2)"
       ],
-      "groupName": "golang.org/x/crypto security updates",
+      "groupName": "golang.org/x/* security updates",
+      "schedule": [
+        "at any time"
+      ],
+      "labels": [
+        "security",
+        "dependencies"
+      ]
+    },
+    {
+      "description": "Separate PR for HashiCorp Vault client library updates",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackagePatterns": [
+        "^github\\.com/hashicorp/vault"
+      ],
+      "groupName": "Vault client library",
       "schedule": [
         "at any time"
       ],
