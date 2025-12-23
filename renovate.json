@@ -1,0 +1,103 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Europe/Paris",
+  "schedule": [
+    "before 10am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommits": "enabled",
+  "commitMessagePrefix": "chore(deps):",
+  "automerge": false,
+  "major": {
+    "automerge": false
+  },
+  "minor": {
+    "automerge": false
+  },
+  "patch": {
+    "automerge": false
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security",
+      "dependencies"
+    ],
+    "automerge": false,
+    "schedule": [
+      "at any time"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Group all Go dependencies updates in a single PR",
+      "matchDatasources": [
+        "go"
+      ],
+      "groupName": "Go dependencies",
+      "schedule": [
+        "before 10am on monday"
+      ]
+    },
+    {
+      "description": "Separate PR for golang.org/x/crypto security updates",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackageNames": [
+        "golang.org/x/crypto"
+      ],
+      "groupName": "golang.org/x/crypto security updates",
+      "schedule": [
+        "at any time"
+      ],
+      "labels": [
+        "security",
+        "dependencies"
+      ]
+    },
+    {
+      "description": "Group Azure SDK updates together",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackagePatterns": [
+        "^github\\.com/Azure/"
+      ],
+      "groupName": "Azure SDK",
+      "schedule": [
+        "before 10am on monday"
+      ]
+    },
+    {
+      "description": "GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions",
+      "automerge": false,
+      "schedule": [
+        "before 10am on monday"
+      ]
+    },
+    {
+      "description": "Docker image updates",
+      "matchDatasources": [
+        "docker"
+      ],
+      "groupName": "Docker images",
+      "automerge": false,
+      "schedule": [
+        "before 10am on monday"
+      ]
+    }
+  ],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "ignoreDeps": []
+}
