@@ -42,7 +42,7 @@ FROM scratch AS runtime
 
 # OCI labels
 LABEL org.opencontainers.image.title="vault-raft-backup-operator"
-LABEL org.opencontainers.image.description="Backup and restore Vault Raft snapshots to cloud storage"
+LABEL org.opencontainers.image.description="Backup and restore Vault Hashicorp Raft snapshots to cloud storage"
 LABEL org.opencontainers.image.url="https://github.com/Chapsvision-dev/vault-raft-backup-restore"
 LABEL org.opencontainers.image.source="https://github.com/Chapsvision-dev/vault-raft-backup-restore"
 LABEL org.opencontainers.image.documentation="https://github.com/Chapsvision-dev/vault-raft-backup-restore#readme"
