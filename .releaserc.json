@@ -58,7 +58,8 @@
       {
         "successComment": false,
         "failComment": false,
-        "releasedLabels": ["released"]
+        "releasedLabels": ["released"],
+        "draftRelease": false
       }
     ],
     [
