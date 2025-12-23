@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-raft-operator-sa
+  namespace: vault-hashicorp
+  labels:
+    app.kubernetes.io/name: vault-raft-operator
+    app.kubernetes.io/component: rbac
+---
+# No ClusterRole needed - operator only calls Vault API, not Kubernetes API
+# ServiceAccount token is used for Vault Kubernetes auth only

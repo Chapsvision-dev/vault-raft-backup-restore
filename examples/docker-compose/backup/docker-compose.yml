@@ -1,0 +1,21 @@
+services:
+  vault-raft-backup:
+    image: chapsvision/vault-raft-backup-operator:latest
+    command: ["backup"]
+    env_file:
+      - .env
+    volumes:
+      # Writable volume for temporary snapshot storage
+      - backup-data:/data
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=100m
+
+volumes:
+  backup-data:
+    driver: local

@@ -1,0 +1,21 @@
+services:
+  vault-raft-restore:
+    image: chapsvision/vault-raft-backup-operator:latest
+    command: ["restore"]
+    env_file:
+      - .env
+    volumes:
+      # Writable volume for downloading snapshot
+      - restore-data:/data
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=100m
+
+volumes:
+  restore-data:
+    driver: local

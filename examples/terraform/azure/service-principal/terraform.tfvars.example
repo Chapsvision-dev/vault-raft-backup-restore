@@ -1,0 +1,34 @@
+# Azure Configuration
+azure_subscription_id  = "00000000-0000-0000-0000-000000000000"
+resource_group_name    = "my-resource-group"
+location               = "West Europe"
+storage_account_name   = "mystorageaccount"
+storage_container_name = "vault-snapshots"
+service_principal_name = "vault-raft-operator-sp"
+
+# Kubernetes Configuration
+kubernetes_host                      = "https://my-cluster.hcp.westeurope.azmk8s.io:443"
+kubernetes_cluster_ca_certificate    = "LS0tLS1CRUdJTi..." # base64 encoded CA cert
+kubernetes_token                     = "eyJhbGciOiJS..." # Kubernetes auth token
+kubernetes_namespace                 = "vault-hashicorp"
+
+# Vault Configuration
+vault_address                = "https://vault.example.com:8200"
+vault_token                  = "s.xxxxxxxxxxxxxxx"  # Admin token for setup
+vault_k8s_auth_backend_role  = "vault-raft-operator"
+vault_internal_address       = "http://vault.vault-hashicorp.svc:8200"
+
+# Backup Configuration
+backup_schedule       = "0 2 * * *"  # Daily at 2 AM UTC
+backup_target_prefix  = "snapshots"
+operator_image        = "chapsvision/vault-raft-backup-operator:latest"
+
+# Logging
+log_level  = "info"
+log_format = "json"
+
+# Resource Limits
+resource_requests_cpu    = "100m"
+resource_requests_memory = "256Mi"
+resource_limits_cpu      = "500m"
+resource_limits_memory   = "512Mi"

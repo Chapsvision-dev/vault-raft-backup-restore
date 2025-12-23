@@ -1,0 +1,81 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-raft-restore-manual
+  namespace: vault-hashicorp
+  labels:
+    app.kubernetes.io/name: vault-raft-restore
+    app.kubernetes.io/part-of: vault-raft-operator
+    app.kubernetes.io/component: restore
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600  # Auto-cleanup after 1 hour
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-raft-restore
+        app.kubernetes.io/part-of: vault-raft-operator
+        app.kubernetes.io/component: restore
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: vault-raft-operator-sa
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: tmp-data
+          emptyDir: {}
+      containers:
+        - name: operator
+          image: chapsvision/vault-raft-backup-operator:latest
+          args: ["restore"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+              ephemeral-storage: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+              ephemeral-storage: "1Gi"
+          volumeMounts:
+            - name: tmp-data
+              mountPath: /data
+          env:
+            # Vault (Kubernetes auth)
+            - name: VAULT_ADDR
+              value: "http://vault.vault-hashicorp.svc:8200"
+            - name: VAULT_AUTH_METHOD
+              value: "kubernetes"
+            - name: VAULT_K8S_MOUNT
+              value: "kubernetes"
+            - name: VAULT_K8S_ROLE
+              value: "vault-raft-operator"
+            # Provider (Azure)
+            - name: BACKUP_PROVIDER
+              value: "azure"
+            - name: AZURE_STORAGE_ACCOUNT
+              value: "mystorageaccount"
+            - name: AZURE_STORAGE_CONTAINER
+              value: "vault-snapshots"
+            # Restore config
+            - name: RESTORE_SOURCE
+              value: "snapshots/2025-01-15-02-00-00.snap"  # CHANGE THIS to your snapshot blob key
+            - name: RESTORE_TARGET
+              value: "/data/restored.snap"
+            # Logs
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+          envFrom:
+            - secretRef:
+                name: azure-sp-creds
