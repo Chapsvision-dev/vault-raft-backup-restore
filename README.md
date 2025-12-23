@@ -1,4 +1,4 @@
-# Vault Raft Backup & Restore Operator
+# Vault Hashicorp Raft Backup & Restore Operator
 
 [![CI](https://github.com/Chapsvision-dev/vault-raft-backup-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/Chapsvision-dev/vault-raft-backup-restore/actions/workflows/ci.yml)
 [![Release](https://github.com/Chapsvision-dev/vault-raft-backup-restore/actions/workflows/release.yml/badge.svg)](https://github.com/Chapsvision-dev/vault-raft-backup-restore/actions/workflows/release.yml)
